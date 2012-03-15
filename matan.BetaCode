@@ -1,0 +1,13 @@
+# x - the x axis of the point
+# y - the y axis of the point
+# x0 - the x axis of the first point
+# y0 - the y axis of the first point
+# R - the Resioltion of the test
+# Nx - the numbers of test in the x axis
+# Ny - the numbers of test in the y axis
+# get(x,y) return the z axis of the point(x,y) from array
+
+if(x >= x0 && y >= y0 && x<x0 + R(Nx-1) && y< y0 + R(Ny-1) )
+{
+    
+}
