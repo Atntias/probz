@@ -1,8 +1,8 @@
 import os, gettext, Queue, re
-from traits.api import HasTraits, Instance
+'''from traits.api import HasTraits, Instance
 from traitsui.api import View, Item
 from mayavi.core.ui.api import SceneEditor, MlabSceneModel
-from tvtk.pyface.api import Scene
+from tvtk.pyface.api import Scene'''
 
 ## known bug - after closing the probze gui and reopening the mayavi thing dont work
 
@@ -16,7 +16,7 @@ from numpy import *
 import wx, pronsole, time
 import wx.aui
 #from mayavi import mlab
-
+'''
 class MayaviView(HasTraits):
     scene = Instance(MlabSceneModel, ())
     # The layout of the panel created by Traits
@@ -27,7 +27,7 @@ class MayaviView(HasTraits):
         # Create some data, and plot it using the embedded scene's engine
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
-        
+'''        
 class guiwin(wx.Frame):
     def __init__(self, size=(1000, 500), parent=None):
         self.parent = parent           
@@ -128,19 +128,19 @@ class guiwin(wx.Frame):
             
     def Load(self, event):
         OffsetData = load('{}.npz'.format('offset'))
-        print OffsetData
-        self.mayavi_view = MayaviView()
+        #print OffsetData
+        '''self.mayavi_view = MayaviView()
         self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
         self.notebook.AddPage(page=self.control, caption='3D Display')
         set_printoptions(threshold='nan')           
         print OffsetData['OffsetData']
         print OffsetData['OffsetData'].min()
-        print OffsetData['OffsetData'].max()
+        print OffsetData['OffsetData'].max()'''
         
     def DisCalc(self, X1, Y1, X2, Y2):
         return float(sqrt(power(X1-X2,2) + power(Y1-Y2,2)))
     
-    def GetZforXY(self, X, Y, OffsetData):
+    def GetZforXY(self, X, Y, OffsetData):  #this function makes a simple linar interploation to retrive Z hight for a given X&Y
         # x - the x axis of the point
         # y - the y axis of the point
         # x0 - the x axis of the first point
@@ -176,7 +176,7 @@ class guiwin(wx.Frame):
             result = ( (OffsetData['OffsetData'][Xclose][Yclose]*mag1) + (OffsetData['OffsetData'][Xclose+1][Yclose]*mag2) + (OffsetData['OffsetData'][Xclose+1][Yclose+1]*mag3) + (OffsetData['OffsetData'][Xclose][Yclose+1]*mag4) )
             return result / total
 
-    def GetLayer(self, Filename, LayerNumber):
+    def GetLayer(self, Filename, LayerNumber): #this function return a single layer of gcode as a list of lines
         global _firstLayer_height, _layer_height ,_layerGcode, _TemplayerGcode, counter, findme, currentLayer
         _layerGcode = []
         _TemplayerGcode = []
@@ -198,6 +198,8 @@ class guiwin(wx.Frame):
             if (line.find('G1 Z') is not -1 and clear is not 2 and clear is not 3):  #look for the the *first layer hight* might be diffrent from others
                 left, delimiter, right = line.partition(' F')
                 _firstLayer_height = float(left.replace("G1 Z",""))
+                del _TemplayerGcode[:] #clear saved and continue
+                _TemplayerGcode.append(line)
                 findme = 'G1 Z' + str(_firstLayer_height+_layer_height) # calc the next layer hight
                 clear = 2
             if (line.find(findme) is not -1): #find the next layer
@@ -212,16 +214,26 @@ class guiwin(wx.Frame):
                     if (currentLayer == LayerNumber):
                         fg.close()
                         _layerGcode.pop()
+                        _layerGcode.pop()
                         return _layerGcode #stop and return the gcode
                     else:
                         del _TemplayerGcode[:] #clear saved and continue
                         _TemplayerGcode.append(line)
                         findme = 'G1 Z' + str(_firstLayer_height+_layer_height+(_layer_height*currentLayer))
                         clear = 2 
-  
+
+    def ReplaceLayer(self, Filename, LayerNumber, TargetLayer):
+        pass
+    def SplitLongs(self, Layer):
+        pass
+    def MarkTargets(self, Layer):
+        pass
+    
     def OffsetG(self, event):
         first_layer_Gcode = self.GetLayer('1.gcode', 1)
-        OffsetData = load('{}.npz'.format('offset'))
+        for line in first_layer_Gcode:
+            print line,
+        '''OffsetData = load('{}.npz'.format('offset'))
         for line in first_layer_Gcode:
             if (line.find('G1 X') is not -1):
                 left, delimiter, right = line.partition(' X')
@@ -230,7 +242,7 @@ class guiwin(wx.Frame):
                 Z = self.GetZforXY(float(X),float(Y),OffsetData)              
                 line = line.replace('\n',' Z{}\n'.format(Z))
                 print line,
-        
+        '''
     #    if Dis1 = float(sqwrt(power(X-XcloseRatio,2) + power(Y-YcloseRatio,2)))    
         
     
