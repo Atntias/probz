@@ -1,23 +1,19 @@
 import os, gettext, Queue, re
-'''from traits.api import HasTraits, Instance
-from traitsui.api import View, Item
-from mayavi.core.ui.api import SceneEditor, MlabSceneModel
-from tvtk.pyface.api import Scene'''
-
-## known bug - after closing the probze gui and reopening the mayavi thing dont work
-
-
 if os.path.exists('/usr/share/pronterface/locale'):
     gettext.install('probez', '/usr/share/pronterface/locale', unicode=1)
 else: 
     gettext.install('probez', './locale', unicode=1)
-
 from numpy import *
 import wx, pronsole, time
 import wx.aui
-#from mayavi import mlab
+## known bug - after closing the probze gui and reopening the mayavi thing dont work
 '''
-class MayaviView(HasTraits):
+from traits.api import HasTraits, Instance
+from traitsui.api import View, Item
+from mayavi.core.ui.api import SceneEditor, MlabSceneModel
+from tvtk.pyface.api import Scene
+
+class MayaviView(HasTraits): #class for mayavi view
     scene = Instance(MlabSceneModel, ())
     # The layout of the panel created by Traits
     view = View(Item('scene', editor=SceneEditor(scene_class=Scene), resizable=True,show_label=False),resizable=True)
@@ -28,9 +24,10 @@ class MayaviView(HasTraits):
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
 '''        
-class guiwin(wx.Frame):
+class guiwin(wx.Frame): #class for gui + probing functions
     def __init__(self, size=(1000, 500), parent=None):
-        self.parent = parent           
+        self.parent = parent
+        self.O3D = Offset3D()           
         wx.Frame.__init__(self, parent, title=_("Probe Z"), size=size)
         self.notebook = wx.aui.AuiNotebook(self, id=-1, style=wx.aui.AUI_NB_TAB_SPLIT | wx.aui.AUI_NB_CLOSE_ON_ALL_TABS | wx.aui.AUI_NB_LEFT)
         self.SetIcon(wx.Icon("P-face.ico", wx.BITMAP_TYPE_ICO))
@@ -62,16 +59,14 @@ class guiwin(wx.Frame):
         #self.mainsizer.Fit(self)
         self.Layout()
     
-    def SamplePoint(self):
-        global _LastLine,_CurrentLastLine,_TimeOutCounter,_DeltaFloat
+    def SamplePoint(self): #this function will execute a sapmle
+        _LastLine,_CurrentLastLine,_TimeOutCounter,_DeltaFloat
         _LastLine = self.parent.p.log[-1]
-        _TimeOutCounter = 0
         self.parent.p.send_now("G92 Z5")
         self.parent.p.send_now("G1 Z0 F800")
         self.parent.p.clear = True
         while(True):
             _CurrentLastLine = self.parent.p.log[-1]
-            _TimeOutCounter+=1
             if(_CurrentLastLine is not _LastLine and not _CurrentLastLine.startswith('ok')):
                 break
         _CurrentLastLine = _CurrentLastLine.replace("echo:endstops","").replace("hit:","").replace("Z:","").replace(" ","").replace("\n","")
@@ -83,7 +78,7 @@ class guiwin(wx.Frame):
         result = wx.MessageBox(_('Are you sure you want to probe the grid? this may take a while'), _('Probe the grid?'),
             wx.YES_NO | wx.ICON_QUESTION)
         if (result == 2):
-            global _firstSample,file_out,Step,X_Start,Y_Start,X_End,Y_End,Step,LoopCountX,LoopCountY,_LastLine,_CurrentLastLine,_DeltaFloat,_DeltaStr,_TimeOutCounter,_ProbYPos,_ProbXPos,_InvertDirS,_InvertDirE,_3D_out_String
+            _firstSample,file_out,Step,X_Start,Y_Start,X_End,Y_End,Step,LoopCountX,LoopCountY,_LastLine,_CurrentLastLine,_DeltaFloat,_DeltaStr,_TimeOutCounter,_ProbYPos,_ProbXPos,_InvertDirS,_InvertDirE,_3D_out_String
             X_Start     = int(self.xstart.GetValue())
             Y_Start     = int(self.ystart.GetValue())
             X_End       = int(self.xend.GetValue())
@@ -136,7 +131,23 @@ class guiwin(wx.Frame):
         print OffsetData['OffsetData']
         print OffsetData['OffsetData'].min()
         print OffsetData['OffsetData'].max()'''
-        
+          
+    def OffsetG(self, event):
+        first_layer_Gcode = self.O3D.GetLayer('1.gcode', 1)
+        for line in first_layer_Gcode:
+            print line,
+        '''OffsetData = load('{}.npz'.format('offset'))
+        for line in first_layer_Gcode:
+            if (line.find('G1 X') is not -1):
+                left, delimiter, right = line.partition(' X')
+                X, delimiter2, Yt = right.partition(' Y')
+                Y, delimiter2, junk = Yt.partition(' ')
+                Z = self.GetZforXY(float(X),float(Y),OffsetData)              
+                line = line.replace('\n',' Z{}\n'.format(Z))
+                print line,
+        '''
+    #    if Dis1 = float(sqwrt(power(X-XcloseRatio,2) + power(Y-YcloseRatio,2)))          
+class Offset3D(object): #class for 3d printing offset calculations
     def DisCalc(self, X1, Y1, X2, Y2):
         return float(sqrt(power(X1-X2,2) + power(Y1-Y2,2)))
     
@@ -149,7 +160,7 @@ class guiwin(wx.Frame):
         # Nx - the number of test in the x axis
         # Ny - the number of test in the y axis
         # Rconst = sqrt(R*R/2)
-        global x0,y0,X_End,Y_End,R,Nx,Ny,Rconst,Xclose,Yclose,XcloseRatio,YcloseRatio,Dis1,Dis2,Dis3,Dis4,total,mag1,mag2,mag2,mag4,result
+        Xclose,Yclose,XcloseRatio,YcloseRatio,Dis1,Dis2,Dis3,Dis4,total,mag1,mag2,mag2,mag4,result
         x0    = OffsetData['ProbData'][0]
         y0    = OffsetData['ProbData'][1]
         X_End = OffsetData['ProbData'][2]
@@ -177,7 +188,6 @@ class guiwin(wx.Frame):
             return result / total
 
     def GetLayer(self, Filename, LayerNumber): #this function return a single layer of gcode as a list of lines
-        global _firstLayer_height, _layer_height ,_layerGcode, _TemplayerGcode, counter, findme, currentLayer
         _layerGcode = []
         _TemplayerGcode = []
         counter = 0
@@ -229,20 +239,8 @@ class guiwin(wx.Frame):
     def MarkTargets(self, Layer):
         pass
     
-    def OffsetG(self, event):
-        first_layer_Gcode = self.GetLayer('1.gcode', 1)
-        for line in first_layer_Gcode:
-            print line,
-        '''OffsetData = load('{}.npz'.format('offset'))
-        for line in first_layer_Gcode:
-            if (line.find('G1 X') is not -1):
-                left, delimiter, right = line.partition(' X')
-                X, delimiter2, Yt = right.partition(' Y')
-                Y, delimiter2, junk = Yt.partition(' ')
-                Z = self.GetZforXY(float(X),float(Y),OffsetData)              
-                line = line.replace('\n',' Z{}\n'.format(Z))
-                print line,
-        '''
-    #    if Dis1 = float(sqwrt(power(X-XcloseRatio,2) + power(Y-YcloseRatio,2)))    
-        
-    
+class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
+    pass
+
+class PreformenceTest(object): #class for testing gcode preformence
+    pass    
