@@ -6,9 +6,11 @@ else:
 from numpy import *
 import wx, pronsole, time
 import wx.aui
+import sys
+import fileinput
 ## known bug - after closing the probze gui and reopening the mayavi thing dont work
-'''
-from traits.api import HasTraits, Instance
+
+'''from traits.api import HasTraits, Instance
 from traitsui.api import View, Item
 from mayavi.core.ui.api import SceneEditor, MlabSceneModel
 from tvtk.pyface.api import Scene
@@ -23,7 +25,7 @@ class MayaviView(HasTraits): #class for mayavi view
         # Create some data, and plot it using the embedded scene's engine
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
-'''        
+'''       
 class guiwin(wx.Frame): #class for gui + probing functions
     def __init__(self, size=(1000, 500), parent=None):
         self.parent = parent
@@ -124,19 +126,23 @@ class guiwin(wx.Frame): #class for gui + probing functions
     def Load(self, event):
         OffsetData = load('{}.npz'.format('offset'))
         #print OffsetData
-        '''self.mayavi_view = MayaviView()
-        self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
-        self.notebook.AddPage(page=self.control, caption='3D Display')
-        set_printoptions(threshold='nan')           
+        #self.mayavi_view = MayaviView()
+        #self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
+        #self.notebook.AddPage(page=self.control, caption='3D Display')
+        #set_printoptions(threshold='nan')           
         print OffsetData['OffsetData']
         print OffsetData['OffsetData'].min()
-        print OffsetData['OffsetData'].max()'''
+        print OffsetData['OffsetData'].max()
           
     def OffsetG(self, event):
-        first_layer_Gcode = self.O3D.GetLayer('1.gcode', 1)
+        test = self.O3D.GetLayer('1.gcode', 1)
+        self.O3D.ReplaceLayer('1.gcode', 1, test)     
+        #for line in test2:
+         #   print line, 
+        '''first_layer_Gcode = self.O3D.GetLayer('1.gcode', 1)
         for line in first_layer_Gcode:
             print line,
-        '''OffsetData = load('{}.npz'.format('offset'))
+        OffsetData = load('{}.npz'.format('offset'))
         for line in first_layer_Gcode:
             if (line.find('G1 X') is not -1):
                 left, delimiter, right = line.partition(' X')
@@ -147,6 +153,7 @@ class guiwin(wx.Frame): #class for gui + probing functions
                 print line,
         '''
     #    if Dis1 = float(sqwrt(power(X-XcloseRatio,2) + power(Y-YcloseRatio,2)))          
+
 class Offset3D(object): #class for 3d printing offset calculations
     def DisCalc(self, X1, Y1, X2, Y2):
         return float(sqrt(power(X1-X2,2) + power(Y1-Y2,2)))
@@ -186,54 +193,76 @@ class Offset3D(object): #class for 3d printing offset calculations
             mag4 = float(Rconst-Dis4)
             result = ( (OffsetData['OffsetData'][Xclose][Yclose]*mag1) + (OffsetData['OffsetData'][Xclose+1][Yclose]*mag2) + (OffsetData['OffsetData'][Xclose+1][Yclose+1]*mag3) + (OffsetData['OffsetData'][Xclose][Yclose+1]*mag4) )
             return result / total
-
-    def GetLayer(self, Filename, LayerNumber): #this function return a single layer of gcode as a list of lines
-        _layerGcode = []
-        _TemplayerGcode = []
-        counter = 0
-        clear = 0
-        currentLayer = 0
-        findme = 'str'
+    
+    def GetLayer(self, filename, layer_number): #this function return a single layer of gcode as a list of lines
+        _target_layer = []
+        x = 0
+        _start_layer_index, _end_layer_index = self.GetSlic3rIndexLayer(filename,layer_number)
+        GcodeFile = open(filename, 'r') #open the gcode file
+        for line in GcodeFile:
+            x += 1
+            if x in range(_start_layer_index, _end_layer_index):_target_layer.append(line)
+        GcodeFile.close()
+        return _target_layer 
+                        
+    def GetSlic3rIndexLayer(self, filename, layer_number): #non genric function (gcode specific - slic3r in this case)
+        _start_layer_index = 0
+        _end_layer_index = 0
+        _index_counter = 0
+        _clear = 0
+        _layer_counter = 0
+        _findme = 'str'
         _layer_height = 0
         _firstLayer_height = 0
-        fg = open(Filename, 'r') #open the gcode file
-        for line in fg:
-            counter += 1
-            _TemplayerGcode.append(line)
-            if (counter == 20 and clear == 0): #in case not found in first 20 lines
+        GcodeFile = open(filename, 'r') #open the gcode file
+        for line in GcodeFile:
+            _index_counter += 1
+            if (_layer_counter == 20 and _clear == 0): #in case not found in first 20 lines
+                print 'Bad File! Not a Slic3r format?'
                 break
-            elif (line.find('; layer_height = ') is not -1 and clear == 0): #look for the layer hight Slic3r format only
+            elif (line.find('; layer_height = ') is not -1 and _clear == 0): #look for the layer hight Slic3r format only
                 _layer_height = float(line.replace("; layer_height = ","").replace("\n",""))
-                clear = 1
-            if (line.find('G1 Z') is not -1 and clear is not 2 and clear is not 3):  #look for the the *first layer hight* might be diffrent from others
+                _clear = 1
+            if (line.find('G1 Z') is not -1 and _clear is not 2 and _clear is not 3):  #look for the the *first layer hight* might be diffrent from others
                 left, delimiter, right = line.partition(' F')
                 _firstLayer_height = float(left.replace("G1 Z",""))
-                del _TemplayerGcode[:] #clear saved and continue
-                _TemplayerGcode.append(line)
-                findme = 'G1 Z' + str(_firstLayer_height+_layer_height) # calc the next layer hight
-                clear = 2
-            if (line.find(findme) is not -1): #find the next layer
-                _layerGcode = _TemplayerGcode #save it, might be the result
-                clear = 3
+                _start_layer_index = _index_counter
+                _findme = 'G1 Z' + str(_firstLayer_height+_layer_height) # calc the next layer hight
+                _clear = 2
+            if (line.find(_findme) is not -1): #find the next layer
+                _end_layer_index = _index_counter #save it, might be the result
+                _clear = 3
                 continue
-            if (clear == 3):
-                if (line.find('G92 E0') is not -1):    
-                    clear = 2
+            if (_clear == 3):
+                if (line.find('G92 E0') is not -1): #this means its a z lift not next layer   
+                    _clear = 2
                 else:
-                    currentLayer += 1
-                    if (currentLayer == LayerNumber):
-                        fg.close()
-                        _layerGcode.pop()
-                        _layerGcode.pop()
-                        return _layerGcode #stop and return the gcode
+                    _layer_counter += 1
+                    if (_layer_counter == layer_number):
+                        GcodeFile.close()
+                        return (_start_layer_index, _end_layer_index) #stop and return the indexs
                     else:
-                        del _TemplayerGcode[:] #clear saved and continue
-                        _TemplayerGcode.append(line)
-                        findme = 'G1 Z' + str(_firstLayer_height+_layer_height+(_layer_height*currentLayer))
-                        clear = 2 
-
-    def ReplaceLayer(self, Filename, LayerNumber, TargetLayer):
-        pass
+                        _start_layer_index = _index_counter #clear saved and continue
+                        _findme = 'G1 Z' + str(_firstLayer_height+_layer_height+(_layer_height*currentLayer))
+                        _clear = 2 
+  
+    def ReplaceLayer(self, filename, layer_number, target_layer):
+        x = 0
+        _target_file = []
+        _start_layer_index, _end_layer_index = self.GetSlic3rIndexLayer(filename,layer_number)
+        GcodeFile = open(filename, 'r') #open the gcode file
+        for line in GcodeFile:
+            _target_file.append(line)
+        for x in range(_start_layer_index+1, _end_layer_index+1):
+            _target_file.pop(x)
+        GcodeFile.close()
+        GcodeFile = open('test.gcode', 'w')
+        for line in target_layer:
+            _target_file.insert(_start_layer_index, line)
+            _start_layer_index += 1
+        for line in _target_file:GcodeFile.write(line)
+        GcodeFile.close()
+        return
     def SplitLongs(self, Layer):
         pass
     def MarkTargets(self, Layer):

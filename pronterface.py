@@ -358,7 +358,6 @@ class PronterWindow(wx.Frame,pronsole.pronsole):
         m.AppendSubMenu(self.macros_menu, _("&Macros"))
         self.Bind(wx.EVT_MENU, self.new_macro, self.macros_menu.Append(-1, _("<&New...>")))
         self.Bind(wx.EVT_MENU, lambda *e:options(self), m.Append(-1,_("&Options"),_(" Options dialog")))
-        
         self.Bind(wx.EVT_MENU, lambda x:threading.Thread(target=lambda :self.do_skein("set")).start(), m.Append(-1,_("Slicing Settings"),_(" Adjust slicing settings")))
         #try:
         #    from SkeinforgeQuickEditDialog import SkeinforgeQuickEditDialog
