@@ -137,8 +137,8 @@ class guiwin(wx.Frame): #class for gui + probing functions
     def OffsetG(self, event):
         test = self.O3D.GetLayer('1.gcode', 1)
         self.O3D.ReplaceLayer('1.gcode', 1, test)     
-        #for line in test2:
-         #   print line, 
+        #for line in test:
+        #    print line, 
         '''first_layer_Gcode = self.O3D.GetLayer('1.gcode', 1)
         for line in first_layer_Gcode:
             print line,
@@ -253,16 +253,17 @@ class Offset3D(object): #class for 3d printing offset calculations
         GcodeFile = open(filename, 'r') #open the gcode file
         for line in GcodeFile:
             _target_file.append(line)
-        for x in range(_start_layer_index+1, _end_layer_index+1):
-            _target_file.pop(x)
+        #print _start_layer_index, _end_layer_index
+        for x in range(_start_layer_index, _end_layer_index):
+            _target_file.pop(_start_layer_index-1)
         GcodeFile.close()
         GcodeFile = open('test.gcode', 'w')
         for line in target_layer:
-            _target_file.insert(_start_layer_index, line)
+            _target_file.insert(_start_layer_index-1, line)
             _start_layer_index += 1
         for line in _target_file:GcodeFile.write(line)
         GcodeFile.close()
-        return
+        return 
     def SplitLongs(self, Layer):
         pass
     def MarkTargets(self, Layer):
