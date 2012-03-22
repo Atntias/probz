@@ -245,7 +245,7 @@ class Offset3D(object): #class for 3d printing offset calculations
                         _start_layer_index = _index_counter #clear saved and continue
                         _findme = 'G1 Z' + str(_firstLayer_height+_layer_height+(_layer_height*currentLayer))
                         _clear = 2 
-  
+    
     def ReplaceLayer(self, filename, layer_number, target_layer):
         x = 0
         _target_file = []
@@ -264,13 +264,21 @@ class Offset3D(object): #class for 3d printing offset calculations
         for line in _target_file:GcodeFile.write(line)
         GcodeFile.close()
         return 
-    def SplitLongs(self, Layer):
+    
+    def SplitLines(self, layer):
+        counter, index
+        for line in layer:
+            if (line.find('G1 X') is not -1 and line.find('E') is not -1):               
+             counter += 1               
+    
+    def PlaceZ(self, line, ):  
         pass
-    def MarkTargets(self, Layer):
+
+    def FixData(self, Layer):
         pass
     
 class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
     pass
-
+   
 class PreformenceTest(object): #class for testing gcode preformence
     pass    
