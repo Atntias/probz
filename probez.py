@@ -9,7 +9,7 @@ import wx.aui
 import sys
 import fileinput
 ## known bug - after closing the probze gui and reopening the mayavi thing dont work
-
+'''
 from traits.api import HasTraits, Instance
 from traitsui.api import View, Item
 from mayavi.core.ui.api import SceneEditor, MlabSceneModel
@@ -25,7 +25,7 @@ class MayaviView(HasTraits): #class for mayavi view
         # Create some data, and plot it using the embedded scene's engine
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
-       
+'''       
 class guiwin(wx.Frame): #class for gui + probing functions
     def __init__(self, size=(1000, 500), parent=None):
         self.parent = parent
@@ -126,13 +126,13 @@ class guiwin(wx.Frame): #class for gui + probing functions
     def Load(self, event):
         OffsetData = load('{}.npz'.format('offset'))
         #print OffsetData
-        self.mayavi_view = MayaviView()
-        self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
-        self.notebook.AddPage(page=self.control, caption='3D Display')
-        set_printoptions(threshold='nan')           
-        #print OffsetData['OffsetData']
-        #print OffsetData['OffsetData'].min()
-        #print OffsetData['OffsetData'].max()
+        #self.mayavi_view = MayaviView()
+        #self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
+        #self.notebook.AddPage(page=self.control, caption='3D Display')
+        #set_printoptions(threshold='nan')           
+        print OffsetData['OffsetData']
+        print OffsetData['OffsetData'].min()
+        print OffsetData['OffsetData'].max()
           
     def OffsetG(self, event):
         test = self.O3D.GetLayer('1.gcode', 1)
