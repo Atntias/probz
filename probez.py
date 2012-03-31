@@ -10,7 +10,7 @@ import sys
 import fileinput
 ## known bug - after closing the probze gui and reopening the mayavi thing dont work
 
-'''from traits.api import HasTraits, Instance
+from traits.api import HasTraits, Instance
 from traitsui.api import View, Item
 from mayavi.core.ui.api import SceneEditor, MlabSceneModel
 from tvtk.pyface.api import Scene
@@ -25,7 +25,7 @@ class MayaviView(HasTraits): #class for mayavi view
         # Create some data, and plot it using the embedded scene's engine
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
-'''       
+       
 class guiwin(wx.Frame): #class for gui + probing functions
     def __init__(self, size=(1000, 500), parent=None):
         self.parent = parent
@@ -62,7 +62,7 @@ class guiwin(wx.Frame): #class for gui + probing functions
         self.Layout()
     
     def SamplePoint(self): #this function will execute a sapmle
-        _LastLine,_CurrentLastLine,_TimeOutCounter,_DeltaFloat
+        _LastLine = _CurrentLastLine = _TimeOutCounter = _DeltaFloat = 0
         _LastLine = self.parent.p.log[-1]
         self.parent.p.send_now("G92 Z5")
         self.parent.p.send_now("G1 Z0 F800")
@@ -77,10 +77,10 @@ class guiwin(wx.Frame): #class for gui + probing functions
         return _CurrentLastLine
     
     def ProbeZ(self, event):
+        _firstSample = file_out = Step = X_Start = Y_Start = X_End = Y_End = Step = LoopCountX = LoopCountY = _LastLine = _CurrentLastLine = _DeltaFloat = _DeltaStr = _TimeOutCounter = _ProbYPos = _ProbXPos = _InvertDirS = _InvertDirE = _3D_out_String = 0
         result = wx.MessageBox(_('Are you sure you want to probe the grid? this may take a while'), _('Probe the grid?'),
             wx.YES_NO | wx.ICON_QUESTION)
         if (result == 2):
-            _firstSample,file_out,Step,X_Start,Y_Start,X_End,Y_End,Step,LoopCountX,LoopCountY,_LastLine,_CurrentLastLine,_DeltaFloat,_DeltaStr,_TimeOutCounter,_ProbYPos,_ProbXPos,_InvertDirS,_InvertDirE,_3D_out_String
             X_Start     = int(self.xstart.GetValue())
             Y_Start     = int(self.ystart.GetValue())
             X_End       = int(self.xend.GetValue())
@@ -126,13 +126,13 @@ class guiwin(wx.Frame): #class for gui + probing functions
     def Load(self, event):
         OffsetData = load('{}.npz'.format('offset'))
         #print OffsetData
-        #self.mayavi_view = MayaviView()
-        #self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
-        #self.notebook.AddPage(page=self.control, caption='3D Display')
-        #set_printoptions(threshold='nan')           
-        print OffsetData['OffsetData']
-        print OffsetData['OffsetData'].min()
-        print OffsetData['OffsetData'].max()
+        self.mayavi_view = MayaviView()
+        self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
+        self.notebook.AddPage(page=self.control, caption='3D Display')
+        set_printoptions(threshold='nan')           
+        #print OffsetData['OffsetData']
+        #print OffsetData['OffsetData'].min()
+        #print OffsetData['OffsetData'].max()
           
     def OffsetG(self, event):
         test = self.O3D.GetLayer('1.gcode', 1)
