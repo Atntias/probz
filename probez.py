@@ -8,6 +8,7 @@ import wx, pronsole, time
 import wx.aui
 import sys
 import fileinput
+set_printoptions(linewidth=80)
 ## known bug - after closing the probze gui and reopening the mayavi thing dont work
 '''
 from traits.api import HasTraits, Instance
@@ -25,11 +26,12 @@ class MayaviView(HasTraits): #class for mayavi view
         # Create some data, and plot it using the embedded scene's engine
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
-'''       
+'''    
 class guiwin(wx.Frame): #class for gui + probing functions
     def __init__(self, size=(1000, 500), parent=None):
         self.parent = parent
-        self.O3D = Offset3D()           
+        self.O3D = Offset3D() 
+        self.OPCG = OffsetPCBGOCDE()           
         wx.Frame.__init__(self, parent, title=_("Probe Z"), size=size)
         self.notebook = wx.aui.AuiNotebook(self, id=-1, style=wx.aui.AUI_NB_TAB_SPLIT | wx.aui.AUI_NB_CLOSE_ON_ALL_TABS | wx.aui.AUI_NB_LEFT)
         self.SetIcon(wx.Icon("P-face.ico", wx.BITMAP_TYPE_ICO))
@@ -48,9 +50,13 @@ class guiwin(wx.Frame): #class for gui + probing functions
         self.ld = wx.Button(self.panel, label=_("Load File"), pos=(5, 200))
         self.sv = wx.Button(self.panel, label=_("Offset Gcode"), pos=(90, 200))
         self.eb = wx.Button(self.panel, label=_("Cancel"), pos=(90, 150))
+        self.ts = wx.Button(self.panel, label=_("Test Data"), pos=(5, 250))
+        self.pr = wx.Button(self.panel, label=_("Print Data"), pos=(90, 250))
         self.eb.Bind(wx.EVT_BUTTON, lambda e: self.Destroy())
         self.cl.Bind(wx.EVT_BUTTON, self.ProbeZ)
         self.ld.Bind(wx.EVT_BUTTON, self.Load)
+        self.ts.Bind(wx.EVT_BUTTON, self.TestData)
+        self.pr.Bind(wx.EVT_BUTTON, self.PrintData)
         self.sv.Bind(wx.EVT_BUTTON, self.OffsetG)
         self.basedir = "."
         #self.mainsizer.AddSpacer(10)
@@ -99,7 +105,7 @@ class guiwin(wx.Frame): #class for gui + probing functions
                 self.parent.p.send_now('G1 Z1')
                 self.parent.p.send_now('G28 X0 Y0')
                 self.parent.p.send_now('G28 Z0')
-                self.parent.p.send_now('G1 Z1')
+                self.parent.p.send_now('G1 Z5')
                 self.parent.p.send_now('G1 X{0} Y{1}'.format(X_Start, Y_Start))
                 self.parent.p.send_now('G92 X0 Y0')
                 _firstSample = self.SamplePoint()
@@ -122,21 +128,44 @@ class guiwin(wx.Frame): #class for gui + probing functions
             else:
                 print _("Printer is not online.")
             self.Refresh()
-            
-    def Load(self, event):
+    
+    def TestData(self, event): #this function will take you 0.1mm over each 4 of the points of data and let you see if data is good.
+            self.parent.p.send_now('G92 Z0') 
+            self.parent.p.send_now('G1 Z1')
+            self.parent.p.send_now('G28 X0 Y0')
+            self.parent.p.send_now('G28 Z0') #home all axis so we start from same ref.
+            self.parent.p.send_now('G1 Z5')
+            for i in range(0, 50):
+                self.parent.p.send_now('G1 X50 Y50') #go to z 0.1 @ Xstart Ystart
+                _test = self.SamplePoint()
+                self.parent.p.send_now('G1 X60 Y60') #go to z 0.1 @ Xstart Ystart
+                _test = self.SamplePoint()
+                print i
+
+                 
+    def PrintData(self, event):
         OffsetData = load('{}.npz'.format('offset'))
-        #print OffsetData
+        print OffsetData['OffsetData']
+        print 'Min Z = {}'.format(OffsetData['OffsetData'].min())
+        print 'Max Z = {}'.format(OffsetData['OffsetData'].max())
+        print 'Start X = {}'.format(OffsetData['ProbData'][0])
+        print 'Start Y = {}'.format(OffsetData['ProbData'][1])
+        print 'End X = {}'.format(OffsetData['ProbData'][2])
+        print 'End Y = {}'.format(OffsetData['ProbData'][3])
+        print 'Step = {}'.format(OffsetData['ProbData'][4])        
         #self.mayavi_view = MayaviView()
         #self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
         #self.notebook.AddPage(page=self.control, caption='3D Display')
-        #set_printoptions(threshold='nan')           
-        print OffsetData['OffsetData']
-        print OffsetData['OffsetData'].min()
-        print OffsetData['OffsetData'].max()
-          
+        #set_printoptions(threshold='nan')
+                  
+    def Load(self, event):
+        #OffsetData = load('{}.npz'.format('offset'))        
+        pass
+      
     def OffsetG(self, event):
-        test = self.O3D.GetLayer('1.gcode', 1)
-        self.O3D.ReplaceLayer('1.gcode', 1, test)     
+        #test = self.O3D.GetLayer('1.gcode', 1)
+        #self.O3D.ReplaceLayer('1.gcode', 1, test)
+        self.OPCG.PcbOffset('pcbtest.gcode')
         #for line in test:
         #    print line, 
         '''first_layer_Gcode = self.O3D.GetLayer('1.gcode', 1)
@@ -278,7 +307,105 @@ class Offset3D(object): #class for 3d printing offset calculations
         pass
     
 class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
-    pass
-   
-class PreformenceTest(object): #class for testing gcode preformence
-    pass    
+    def DisCalc(self, X1, Y1, X2, Y2):
+        return float(sqrt(power(X1-X2,2) + power(Y1-Y2,2)))
+
+    def GetZforXY(self, X, Y, OffsetData):  #this function makes a simple linar interploation to retrive Z hight for a given X&Y
+        # x - the x axis of the point
+        # y - the y axis of the point
+        # x0 - the x axis of the first point
+        # y0 - the y axis of the first point
+        # R - the Resioltion of the test
+        # Nx - the number of test in the x axis
+        # Ny - the number of test in the y axis
+        # Rconst = sqrt(R*R/2)
+        Xclose = Yclose = XcloseRatio = YcloseRatio = Dis1 = Dis2 = Dis3 = Dis4 = total = mag1 = mag2 = mag2 = mag4 = result = 0
+        x0    = OffsetData['ProbData'][0]
+        y0    = OffsetData['ProbData'][1]
+        X_End = OffsetData['ProbData'][2]
+        Y_End = OffsetData['ProbData'][3]
+        R     = OffsetData['ProbData'][4]
+        Nx    = int(round((X_End - x0) / R, 0))
+        Ny    = int(round((Y_End - y0) / R, 0))
+        Rconst = sqrt(R*R*2)
+        
+        if( X >= x0 and Y >= y0 and X<x0 + R*(Nx-1) and Y< y0 + R*(Ny-1) ):
+            Xclose = int(round((X-x0)/R, 0))
+            Yclose = int(round((Y-y0)/R, 0))      
+            XcloseRatio = float(x0 + R*Xclose)      
+            YcloseRatio = float(y0 + R*Yclose)
+            Dis1 = self.DisCalc(X,Y,XcloseRatio,YcloseRatio)
+            Dis2 = self.DisCalc(X,Y,XcloseRatio+R,YcloseRatio)
+            Dis3 = self.DisCalc(X,Y,XcloseRatio+R,YcloseRatio+R)
+            Dis4 = self.DisCalc(X,Y,XcloseRatio,YcloseRatio+R)
+            total = float(4 * Rconst - (Dis1 + Dis2 + Dis3 + Dis4))
+            mag1 = float(Rconst-Dis1)
+            mag2 = float(Rconst-Dis2)
+            mag3 = float(Rconst-Dis3)
+            mag4 = float(Rconst-Dis4)
+            result = ( (OffsetData['OffsetData'][Xclose][Yclose]*mag1) + (OffsetData['OffsetData'][Xclose+1][Yclose]*mag2) + (OffsetData['OffsetData'][Xclose+1][Yclose+1]*mag3) + (OffsetData['OffsetData'][Xclose][Yclose+1]*mag4) )
+            result = result / total
+            format(result, ".4f")
+            return result
+    
+    def GetLayer(self, filename, layer_number): #this function return a single layer of gcode as a list of lines
+        _target_layer = []
+        x = 0
+        _start_layer_index, _end_layer_index = self.GetSlic3rIndexLayer(filename,layer_number)
+        GcodeFile = open(filename, 'r') #open the gcode file
+        for line in GcodeFile:
+            x += 1
+            if x in range(_start_layer_index, _end_layer_index):_target_layer.append(line)
+        GcodeFile.close()
+        return _target_layer 
+                        
+    def PcbOffset(self, filename): #non genric function (gcode specific - slic3r in this case)
+        _index_counter = 0
+        _clear = 0
+        _X = 0
+        _Y = 0
+        _Z = 0
+        _target_file = []
+        GcodeFile = open(filename, 'r') #open the gcode file
+        OffsetData = load('{}.npz'.format('offset'))
+        
+        for line in GcodeFile:
+            _index_counter += 1 
+            if (line.find('G00 X') is not -1 or line.find('G01 X') is not -1):
+                left, delimiter, right = line.partition('X')
+                left, delimiter, right = right.partition(' Y')  
+                _X = float(left)
+                if(right.find(' F200.00') is not -1):
+                    right = right.replace(" F200.00","")
+                right = right.replace("\n","")
+                _Y = float(right)
+            elif (line.find('G01 Z-') is not -1):
+                _Z = self.GetZforXY(_X, _Y, OffsetData)
+                line = 'G01 Z{} F200.00\n'.format(_Z - 0.2)
+            _target_file.append(line)
+            
+        GcodeFile.close()        
+        GcodeFile = open('test2.gcode', 'w')        
+        for line in _target_file:GcodeFile.write(line)
+        GcodeFile.close()
+
+             
+    def ReplaceLayer(self, filename, layer_number, target_layer):
+        x = 0
+        _target_file = []
+        _start_layer_index, _end_layer_index = self.GetSlic3rIndexLayer(filename,layer_number)
+        GcodeFile = open(filename, 'r') #open the gcode file
+        for line in GcodeFile:
+            _target_file.append(line)
+        #print _start_layer_index, _end_layer_index
+        for x in range(_start_layer_index, _end_layer_index):
+            _target_file.pop(_start_layer_index-1)
+        GcodeFile.close()
+        GcodeFile = open('test.gcode', 'w')
+        for line in target_layer:
+            _target_file.insert(_start_layer_index-1, line)
+            _start_layer_index += 1
+        for line in _target_file:GcodeFile.write(line)
+        GcodeFile.close()
+        return 
+  
