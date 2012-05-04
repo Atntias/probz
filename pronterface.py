@@ -93,7 +93,6 @@ class PronterWindow(wx.Frame,pronsole.pronsole):
         wx.Frame.__init__(self,None,title=_("Printer Interface"),size=size);
         self.SetIcon(wx.Icon("P-face.ico",wx.BITMAP_TYPE_ICO))
         self.panel=wx.Panel(self,-1,size=size)
-
         self.statuscheck=False
         self.capture_skip=[]
         self.tempreport=""
@@ -717,8 +716,15 @@ class PronterWindow(wx.Frame,pronsole.pronsole):
         
     def probez(self,e):
         import probez        
-        probez.guiwin(size=(800,500),parent=self).Show()
-    
+        probez.GuiWin(size=(800,500),parent=self).Show()
+
+        #import pstats
+        #p = pstats.Stats('test')
+        #p.print_stats()
+        #p.sort_stats('time', 'cum').print_stats(.5, 'init')
+        #p.sort_stats('name')
+        #p.sort_stats('cum').print_stats(100)
+        #p.sort_stats('calls').print_stats(100)
     def platecb(self,name):
         print "plated: "+name
         self.loadfile(None,name)

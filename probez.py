@@ -9,9 +9,15 @@ import wx.aui
 import sys
 import fileinput
 import threading
+import cProfile        
+
 set_printoptions(linewidth=80)
+
+
+
+
 ## known bug - after closing the probze gui and reopening the mayavi thing dont work seems to be related to how the gui is killed but couldnt figure it out.
-'''
+
 from traits.api import HasTraits, Instance
 from traitsui.api import View, Item
 from mayavi.core.ui.api import SceneEditor, MlabSceneModel
@@ -27,12 +33,13 @@ class MayaviView(HasTraits): #class for mayavi view
         # Create some data, and plot it using the embedded scene's engine
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
-'''   
-class guiwin(wx.Frame): #class for gui + general functions
+ 
+class GuiWin(wx.Frame): #class for gui + general functions
     def __init__(self, size=(0, 0), parent=None):
         self.parent = parent
         self.O3D = Offset3D() 
-        self.OPCG = OffsetPCBGOCDE(parent=self)           
+        self.OPCG = OffsetPCBGOCDE(parent=self)
+        self.PROBZ = ProbeZ(parent=self)         
         wx.Frame.__init__(self, parent, title=_("Probe Z"), size=size)
         self.notebook = wx.aui.AuiNotebook(self, id=-1, style=wx.aui.AUI_NB_TAB_SPLIT | wx.aui.AUI_NB_CLOSE_ON_ALL_TABS | wx.aui.AUI_NB_LEFT)
         self.SetIcon(wx.Icon("P-face.ico", wx.BITMAP_TYPE_ICO))
@@ -47,21 +54,22 @@ class guiwin(wx.Frame): #class for gui + general functions
         self.lystart = wx.StaticText(self.panel,label="Y Start: ", pos=(10, 63))
         self.lxend   = wx.StaticText(self.panel,label="X End: ", pos=(10, 88))
         self.lyend   = wx.StaticText(self.panel,label="Y End: ", pos=(10, 113))
-        self.cl = wx.Button(self.panel, label=_("Probe Z!"), pos=(5, 150))
-        self.ld = wx.Button(self.panel, label=_("Load File"), pos=(5, 200))
-        self.sv = wx.Button(self.panel, label=_("Offset!"), pos=(90, 200))
-        self.eb = wx.Button(self.panel, label=_("Cancel"), pos=(90, 150))
-        self.ts = wx.Button(self.panel, label=_("Test Data"), pos=(5, 250))
-        self.pr = wx.Button(self.panel, label=_("Print Data"), pos=(90, 250))
+        self.pz = wx.Button(self.panel, label=_("Probe Z!"), pos=(5, 150))
+        self.lf = wx.Button(self.panel, label=_("Load File"), pos=(5, 200))
+        self.of = wx.Button(self.panel, label=_("Offset!"), pos=(90, 200))
+        self.ca = wx.Button(self.panel, label=_("Cancel"), pos=(90, 150))
+        self.td = wx.Button(self.panel, label=_("Test Data"), pos=(5, 250))
+        self.pd = wx.Button(self.panel, label=_("Show Data"), pos=(90, 250))
         self.gauge = wx.Gauge(self.panel, range=100000, pos=(5, 300), size=(160, 15))
-        self.eb.Bind(wx.EVT_BUTTON, lambda e: self.Destroy())
-        self.cl.Bind(wx.EVT_BUTTON, self.ProbeZ)
-        self.ld.Bind(wx.EVT_BUTTON, self.Load)
-        self.ts.Bind(wx.EVT_BUTTON, self.TestData)
-        self.pr.Bind(wx.EVT_BUTTON, self.PrintData)
-        self.sv.Bind(wx.EVT_BUTTON, self.OffsetG)
+        self.ca.Bind(wx.EVT_BUTTON, lambda e: self.Destroy())
+        self.pz.Bind(wx.EVT_BUTTON, self.ProbeZ)
+        self.lf.Bind(wx.EVT_BUTTON, self.Load)
+        self.td.Bind(wx.EVT_BUTTON, self.TestData)
+        self.pd.Bind(wx.EVT_BUTTON, self.PrintData)
+        self.of.Bind(wx.EVT_BUTTON, self.OffsetG)
         self.basedir = "."
-        #self.mainsizer.AddSpacer(10)
+        self.filename = ""        
+        self.of.Disable()
         self.mainsizer = wx.BoxSizer(wx.HORIZONTAL)
         self.mainsizer.Add(self.panel,9, wx.EXPAND)
         self.mainsizer.Add(self.notebook,32, wx.EXPAND)
@@ -69,118 +77,15 @@ class guiwin(wx.Frame): #class for gui + general functions
         #self.mainsizer.Fit(self)
         self.Layout()
     
-    def SamplePoint(self): #this function will execute a single prob, TODO : make elevation reletive to last point not, absulute.
-        _LastLine = _CurrentLastLine = _TimeOutCounter = _DeltaFloat = 0
-        _LastLine = self.parent.p.log[-1]
-        self.parent.p.send_now("G92 Z8")
-        self.parent.p.send_now("G1 Z0 F800")
-        self.parent.p.clear = True
-        while(True):
-            _CurrentLastLine = self.parent.p.log[-1]
-            if(_CurrentLastLine is not _LastLine and not _CurrentLastLine.startswith('ok')):
-                break
-        _CurrentLastLine = _CurrentLastLine.replace("echo:endstops","").replace("hit:","").replace("Z:","").replace(" ","").replace("\n","")
-        _DeltaFloat = 8-float(_CurrentLastLine)
-        self.parent.p.send_now('G1 Z' + str(_DeltaFloat))
-        return _CurrentLastLine
-    
     def ProbeZ(self, event): #this function is the probing rutine
-        _firstSample = file_out = Step = X_Start = Y_Start = X_End = Y_End = Step = LoopCountX = LoopCountY = _LastLine = _CurrentLastLine = _DeltaFloat = _DeltaStr = _TimeOutCounter = _ProbYPos = _ProbXPos = _InvertDirS = _InvertDirE = _3D_out_String = 0
-        result = wx.MessageBox(_('Are you sure you want to probe the grid? this may take a while'), _('Probe the grid?'),
-            wx.YES_NO | wx.ICON_QUESTION)
-        if (result == 2):
-            X_Start     = int(self.xstart.GetValue())
-            Y_Start     = int(self.ystart.GetValue())
-            X_End       = int(self.xend.GetValue())
-            Y_End       = int(self.yend.GetValue())
-            Step        = int(self.step.GetValue())
-            file_out    = 'offset'
-            LoopCountX  = int(round((X_End - X_Start) / Step, 0))
-            LoopCountY  = int(round((Y_End - Y_Start) / Step, 0))
-            _OffsetData = zeros( ((X_End-X_Start)/Step,(Y_End-Y_Start)/Step), dtype=float )
-            _ProbData   = ([X_Start,Y_Start,X_End,Y_End,Step])
-            if self.parent.p.online:            
-                print Step
-                print LoopCountY
-                self.parent.p.send_now('G92 Z0')
-                self.parent.p.send_now('G1 Z1')
-                self.parent.p.send_now('G28 X0 Y0')
-                self.parent.p.send_now('G28 Z0')
-                self.parent.p.send_now('G1 Z8')
-                self.parent.p.send_now('G1 X{0} Y{1}'.format(X_Start, Y_Start))
-                self.parent.p.send_now('G92 X0 Y0')
-                _firstSample = self.SamplePoint()
-                for _ProbYPos in range(0, LoopCountY):
-                    self.parent.p.send_now('G1 Y' + str(_ProbYPos*Step) + ' F10000')
-                    if _ProbYPos%2==0:
-                      _InvertDirS = 0
-                      _InvertDirE = LoopCountX
-                      LoopStep = 1
-                    else:
-                      _InvertDirS = LoopCountX-1
-                      _InvertDirE = -1
-                      LoopStep = -1
-                    for _ProbXPos in range(_InvertDirS, _InvertDirE, LoopStep):
-                      self.parent.p.send_now('G1 X' + str(_ProbXPos*Step) + ' F10000')
-                      _CurrentLastLine = self.SamplePoint()
-                      _OffsetData[_ProbXPos,_ProbYPos] = float(_CurrentLastLine)-float(_firstSample)                    
-                savez(file_out, OffsetData=_OffsetData, ProbData=_ProbData)
-            else:
-                print _("Printer is not online.")
-            self.Refresh()
-    
+        child = threading.Thread(target=self.PROBZ.ProbeZ)
+        child.setDaemon(True)
+        child.start()
+                
     def TestData(self, event): #this function will go 0.2mm over each 4 of the end points of data and see there is no endstop hit then go down by 0.1 and get an enstop hit.        
-
-        OffsetData = load('{}.npz'.format('offset'))
-        z_max = OffsetData['OffsetData'].max()
-        z_min = OffsetData['OffsetData'].min()
-        X_Start    = OffsetData['ProbData'][0]
-        y0    = OffsetData['ProbData'][1]
-        X_End = OffsetData['ProbData'][2]
-        Y_End = OffsetData['ProbData'][3]
-        R     = OffsetData['ProbData'][4]
-        Nx    = int(round((X_End - X_Start) / R, 0))
-        Ny    = int(round((Y_End - y0) / R, 0))
-        print Nx, Ny
-        result = wx.MessageBox(_('Start? This Will Home First, Make Sure The Prob Is Connected'), _('Testing Data'),
-            wx.YES_NO | wx.ICON_QUESTION)
-        if (result == 2):
-            self.parent.p.send_now('G92 Z0') 
-            self.parent.p.send_now('G1 Z1')
-            self.parent.p.send_now('G28 X0 Y0')
-            self.parent.p.send_now('G28 Z0') #home all axis so we start from same ref.
-            self.parent.p.send_now('G1 Z{}'.format(z_max+3)) #go up 1mm above z max so we dont run into the plate
-            self.parent.p.send_now('G1 X{0} Y{1}'.format(X_Start, y0)) #go to z 0.1 @ Xstart Ystart
-            self.parent.p.send_now('G1 Z{}'.format(OffsetData['OffsetData'][0][0]+0.2))
-            print 'point 1 Z{}'.format(OffsetData['OffsetData'][0][0]+0.2)
-        else: return
-        
-        result = wx.MessageBox(_('Next Point?'), _('Testing Data'),
-            wx.YES_NO | wx.ICON_QUESTION)
-        if (result == 2):
-            self.parent.p.send_now('G1 Z{}'.format(z_max+3)) #go up 1mm above z max so we dont run into the plate
-            self.parent.p.send_now('G1 X{0} Y{1}'.format(X_Start, Y_End)) #go to z 0.1 @ Xstart Ystart
-            self.parent.p.send_now('G1 Z{}'.format(OffsetData['OffsetData'][0][Ny-1]+0.2))
-            print 'point 2 Z{}'.format(OffsetData['OffsetData'][0][Ny-1]+0.2)
-        else: return        
-        
-        result = wx.MessageBox(_('Next Point?'), _('Testing Data'),
-            wx.YES_NO | wx.ICON_QUESTION)
-        if (result == 2):
-            self.parent.p.send_now('G1 Z{}'.format(z_max+3)) #go up 1mm above z max so we dont run into the plate
-            self.parent.p.send_now('G1 X{0} Y{1}'.format(X_End, Y_End)) #go to z 0.1 @ Xstart Ystart
-            self.parent.p.send_now('G1 Z{}'.format(OffsetData['OffsetData'][Nx-1][Ny-1]+0.2))
-            print 'point 3 Z{}'.format(OffsetData['OffsetData'][Nx-1][Ny-1]+0.2)
-        else: return 
-        
-        result = wx.MessageBox(_('Next Point?'), _('Testing Data'),
-            wx.YES_NO | wx.ICON_QUESTION)
-        if (result == 2):
-            self.parent.p.send_now('G1 Z{}'.format(z_max+3)) #go up 1mm above z max so we dont run into the plate
-            self.parent.p.send_now('G1 X{0} Y{1}'.format(X_End, y0)) #go to z 0.1 @ Xstart Ystart
-            self.parent.p.send_now('G1 Z{}'.format(OffsetData['OffsetData'][Nx-1][0]+0.2))
-            print 'point 4 Z{}'.format(OffsetData['OffsetData'][Nx-1][0]+0.2)
-        else: return
+        child = threading.Thread(target=self.PROBZ.TestData)
+        child.setDaemon(True)
+        child.start()
                  
     def PrintData(self, event): #this function will simply print the data
         OffsetData = load('{}.npz'.format('offset'))
@@ -192,72 +97,279 @@ class guiwin(wx.Frame): #class for gui + general functions
         print 'End X = {}'.format(OffsetData['ProbData'][2])
         print 'End Y = {}'.format(OffsetData['ProbData'][3])
         print 'Step = {}'.format(OffsetData['ProbData'][4])        
+
+        self.xstart.SetValue(str(OffsetData['ProbData'][0]))
+        self.ystart.SetValue(str(OffsetData['ProbData'][1]))
+        self.xend.SetValue(str(OffsetData['ProbData'][2]))
+        self.yend.SetValue(str(OffsetData['ProbData'][3]))
+        self.step.SetValue(str(OffsetData['ProbData'][4]))
+        
+        #self.OPCG.TestFunction()
                  
-    def Load(self, event):
-        #OffsetData = load('{}.npz'.format('offset'))        
-        #self.mayavi_view = MayaviView()
-        #self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
-        #self.notebook.AddPage(page=self.control, caption='3D Display')
-        #set_printoptions(threshold='nan')
-        pass
+        OffsetData = load('{}.npz'.format('offset'))        
+        self.mayavi_view = MayaviView()
+        self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
+        self.notebook.AddPage(page=self.control, caption='3D Display')
+        set_printoptions(threshold='nan')
+        
+    def Load(self,  event, filename=None):
+        basedir=self.parent.settings.last_file_path
+        if not os.path.exists(basedir):
+            basedir = "."
+            try:
+                basedir=os.path.split(self.filename)[0]
+            except:
+                pass
+        dlg=wx.FileDialog(self,_("Open file to offset"),basedir,style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
+        dlg.SetWildcard(_("Tap, NC, and GCODE files (;*.gcode;*.gco;*.g;*.nc;*.tap;)"))
+        if(filename is not None or dlg.ShowModal() == wx.ID_OK):
+            if filename is not None:
+                name=filename
+            else:
+                name=dlg.GetPath()
+            if not(os.path.exists(name)):
+                self.parent.status.SetStatusText(_("File not found!"))
+                return
+            path = os.path.split(name)[0]
+            if path != self.parent.settings.last_file_path:
+                self.parent.set("last_file_path",path)
+            else:
+                self.filename=name
+                self.of.Enable()
+                try: 
+                    _Changed = self.OPCG.PrepareGcode(self.filename)
+                    if (_Changed > 0): print 'File Offseted Into The Probed Area!'
+                    print 'File Loaded Correctly!'
+                except: 
+                    print 'Insufficent Probing Data, Probe larger or Load Smaller Gcode'
+                    return
       
     def OffsetG(self, event):
-        #try: 
-        self.OPCG.PrepareGcode('pcbtest.gcode')
-        #except: 
-        #    print 'Insufficent Probing Data, Probe larger or Load Smaller Gcode'
-        #    return
-        child = threading.Thread(target=self.OPCG.PcbOffset, args=['pcbtest.gcode'])
+        child = threading.Thread(target=self.OPCG.PcbOffset, args=[self.filename])
         child.setDaemon(True)
         child.start()
+        #self.OPCG.PcbOffset(self.filename)
+
+class ProbeZ(object):
+    def __init__(self, parent=None):        
+        self.parent = parent
+        self.OC = OffsetCalc()    
+        self.OffsetData = load('{}.npz'.format('offset')) # load the Offset data and initailze it 
+        self.X_Start    = self.OffsetData['ProbData'][0]
+        self.Y_Start    = self.OffsetData['ProbData'][1] 
+        self.X_End      = self.OffsetData['ProbData'][2]
+        self.Y_End      = self.OffsetData['ProbData'][3]
+        try:
+            z_max = self.OffsetData['OffsetData'].max()
+        except:
+            z_max = 6
         
+    def SamplePoint(self): #this function will execute a single prob, TODO : make elevation reletive to last point not, absulute.
+        _LastLine = _CurrentLastLine = _TimeOutCounter = _DeltaFloat = 0
+        _LastLine = self.parent.parent.p.log[-1]
+        #self.parent.parent.p.send_now("G92 Z4")
+        self.parent.parent.p.send_now("G1 Z-5 F60")
+        self.parent.parent.p.clear = True
+        while(True):
+            _CurrentLastLine = self.parent.parent.p.log[-1]
+            if(_CurrentLastLine is not _LastLine and not _CurrentLastLine.startswith('ok')):
+                break
+        _CurrentLastLine = _CurrentLastLine.replace("echo:endstops","").replace("hit:","").replace("Z:","").replace(" ","").replace("\n","")
+        self.parent.parent.p.send_now('G92 Z{}'.format(float(_CurrentLastLine)))
+        self.parent.parent.p.send_now('G1 Z{} F200'.format(1+float(_CurrentLastLine)))
+        return _CurrentLastLine
+    
+    def TestData(self): #this function will go 0.2mm over each 4 of the end points of data and see there is no endstop hit then go down by 0.1 and get an enstop hit.        
+        _A = _B = _Index = _Good_Flag = _Z = 0
+        _LastLine = ''
+
+        result = wx.MessageBox(_('Start? This Will Home First, Make Sure The Prob Is Connected'), _('Testing Data'),
+            wx.YES_NO | wx.ICON_QUESTION)
+        if (result == 2):
+            if self.parent.parent.p.online:                 
+                self.SafeHome(0)
+                self.parent.parent.p.send_now('G1 Z{}'.format(self.z_max+2)) #go up 1mm above z max so we dont run into the plate
+                _A , _B = self.TestPoint(self.X_Start, self.Y_Start)
+                if (_A == -1):print 'Point 1 Too low ' 
+                elif (_A == 1): print 'Point 1 Too high'
+                else: print 'Point 1 (Z={0} Hit = {1}) is Good'.format(_A, _B)
+                
+                self.parent.parent.p.send_now('G1 Z{}'.format(self.z_max+2))                
+                
+                _A , _B = self.TestPoint(self.X_Start, self.Y_End-1)
+                if (_A == -1):print 'Point 2 Too low ' 
+                elif (_A == 1): print 'Point 2 Too high'
+                else: print 'Point 2 (Z={0} Hit = {1}) is Good'.format(_A, _B)
+                
+                self.parent.parent.p.send_now('G1 Z{}'.format(self.z_max+2))                
+                
+                _A , _B = self.TestPoint(self.X_End-1, self.Y_End-1)
+                if (_A == -1):print 'Point 3 Too low ' 
+                elif (_A == 1): print 'Point 3 Too high'
+                else: print 'Point 3 (Z={0} Hit = {1}) is Good'.format(_A, _B)
+                
+                self.parent.parent.p.send_now('G1 Z{}'.format(self.z_max+2))                
+                
+                _A , _B = self.TestPoint(self.X_End-1, self.Y_Start)
+                if (_A == -1):print 'Point 4 Too low ' 
+                elif (_A == 1): print 'Point 4 Too high'
+                else: print 'Point 4 (Z={0} Hit = {1}) is Good'.format(_A, _B)
+                                      
+            else:print _("Printer is not online.") 
+            
+    def TestPoint(self, X, Y): # If using this USE SAFE HOME FIRST!!
+        _tX = _tY = _Index = _Good_Flag = 0
+        _LastLine = ''
+             
+        if (self.X_Start <= X <= self.X_End and self.Y_Start <= Y <= self.Y_End):  
+                self.parent.parent.p.send_now('G1 X{0} Y{1}'.format(X, Y)) #go to z 0.1 @ Xstart Ystart
+                _Z = self.OC.GetZforXY(X, Y)
+                self.parent.parent.p.send_now('G1 Z{}'.format(_Z+0.2))
+                _LastLine = self.parent.parent.p.log[-1]
+                while(True):
+                    _Index += 1
+                    if(_Index > 2000):
+                        print 'TimedOut!'
+                        break
+                    self.parent.parent.p.send_now('M114')
+                    _CurrentLastLine = self.parent.parent.p.log[-1]
+                    time.sleep(0.01)
+                    if(_CurrentLastLine.startswith('ok')):
+                        _CurrentLastLine = self.parent.parent.p.log[-2]
+                    if(_CurrentLastLine.startswith('X:') is True):
+                        left, delimiter, right = _CurrentLastLine.partition('Count ')
+                        left, delimiter, right = right.partition('Y:')
+                        _tX = floor(float(left.replace("X:","")))
+                        left, delimiter, right = right.partition('Z:')
+                        _tY = floor(float(left.replace("Y:","")))                   
+                        if(_tX == X and _tY == Y and float(right) == (_Z+0.2)):
+                            _Good_Flag = 1                            
+                            break                                           
+                if (_Good_Flag is 1):                     
+                    for i in range(1, 10):
+                        _LastLine = self.parent.parent.p.log[i*-1]   
+                        if(_LastLine.startswith('echo:endstops') is False):                                                                                                 
+                            self.parent.parent.p.send_now('G1 Z{}'.format(_Z+0.1))
+                            time.sleep(0.1)
+                            _Good_Flag = 0
+                            break
+                    if(_Good_Flag is 1):
+                        return (-1,-1) #Point Too low 
+                    else:
+                        for i in range(1, 10):
+                            _LastLine = self.parent.parent.p.log[i*-1]
+                            if(_LastLine.startswith('echo:endstops') is True):
+                                _LastLine = _LastLine.replace("echo:endstops","").replace("hit:","").replace("Z:","").replace(" ","").replace("\n","")
+                                return (_Z, _LastLine)#Point is Good 
+                                _Good_Flag = 1
+                                break
+                        if(_Good_Flag is 0):
+                            return (1,1) #Point Too high
+        else:
+            raise NameError('X or Y out of range')
+       
+    def SafeHome(self, endUp): #end up or down = 1 finsihes the move without homeing the z
+        self.parent.parent.p.send_now('G92 Z0')
+        self.parent.parent.p.send_now('G1 Z{}'.format(self.z_max+2)) #go up 1mm above z max so we dont run into the plate    
+        self.parent.parent.p.send_now('G28 X0 Y0')
+        if(endUp != 1):self.parent.parent.p.send_now('G28 Z0') #home z
+ 
+    def ProbeZ(self): #this function is the probing rutine
+        _firstSample = file_out = Step = X_Start = Y_Start = X_End = Y_End = Step = LoopCountX = LoopCountY = _LastLine = _CurrentLastLine = _DeltaFloat = _DeltaStr = _TimeOutCounter = _ProbYPos = _ProbXPos = _InvertDirS = _InvertDirE = _3D_out_String = 0
+        result = wx.MessageBox(_('Are you sure you want to probe the grid? this may take a while'), _('Probe the grid?'),
+            wx.YES_NO | wx.ICON_QUESTION)
+        if (result == 2):
+            X_Start     = int(self.parent.xstart.GetValue())
+            Y_Start     = int(self.parent.ystart.GetValue())
+            X_End       = int(self.parent.xend.GetValue())
+            Y_End       = int(self.parent.yend.GetValue())
+            Step        = int(self.parent.step.GetValue())
+            file_out    = 'offset'
+            LoopCountX  = int(floor((X_End - X_Start) / Step))
+            LoopCountY  = int(floor((Y_End - Y_Start) / Step))
+            _OffsetData = zeros( (LoopCountX+1,LoopCountY+1), dtype=float )
+            _ProbData   = ([X_Start,Y_Start,X_End,Y_End,Step])
+            z_max = 1                  
+            if self.parent.parent.p.online:            
+                self.SafeHome(0)
+                self.parent.parent.p.send_now('G1 Z{}'.format(z_max)) #go up 1mm above z max so we dont run into the plate    
+                self.parent.parent.p.send_now('G1 X{0} Y{1}'.format(X_Start, Y_Start))
+                self.parent.parent.p.send_now('G92 X0 Y0')
+                _firstSample = self.SamplePoint()
+                for _ProbYPos in range(0, LoopCountY+1):
+                    self.parent.parent.p.send_now('G1 Y' + str(_ProbYPos*Step) + ' F10000')
+                    if _ProbYPos%2==0:
+                      _InvertDirS = 0
+                      _InvertDirE = LoopCountX + 1
+                      LoopStep = 1
+                    else:
+                      _InvertDirS = LoopCountX
+                      _InvertDirE = -1
+                      LoopStep = -1
+                    for _ProbXPos in range(_InvertDirS, _InvertDirE, LoopStep):
+                      self.parent.parent.p.send_now('G1 X' + str(_ProbXPos*Step) + ' F10000')
+                      _CurrentLastLine = self.SamplePoint()
+                      _OffsetData[_ProbXPos,_ProbYPos] = float(_CurrentLastLine)-float(_firstSample)                    
+                savez(file_out, OffsetData=_OffsetData, ProbData=_ProbData)
+            else:
+                print _("Printer is not online.")
+            self.parent.Refresh()
+                    
 class OffsetCalc(object):
+    def __init__(self, parent=None):        
+        self.ReloadData()
+        
+    def ReloadData(self):
+        self.OffsetData = load('{}.npz'.format('offset')) # load the Offset data and initailze it 
+        self.X_Start    = self.OffsetData['ProbData'][0]
+        self.Y_Start    = self.OffsetData['ProbData'][1] 
+        self.X_End      = self.OffsetData['ProbData'][2]
+        self.Y_End      = self.OffsetData['ProbData'][3]
+        self.R          = self.OffsetData['ProbData'][4] # R - the Resolution of the test
+        self.Nx    = int(floor((self.X_End - self.X_Start) / self.R))
+        self.Ny    = int(floor((self.Y_End - self.Y_Start) / self.R))
+        self.MyOffsetData = self.OffsetData['OffsetData']        
+
     def DisCalc(self, X1, Y1, X2, Y2):
         result = float(sqrt(power(X1-X2,2) + power(Y1-Y2,2)))
         result = format(result, ".4f")
         return float(result)
 
-    def GetZforXY(self, X, Y, OffsetData):  #this function makes a simple bilinar interploation to retrive Z hight for a given X&Y            
+    def GetZforXY(self, X, Y):  #this function makes a simple bilinar interploation to retrive Z hight for a given X&Y            
         Xclose = Yclose = XcloseRatio = YcloseRatio = r1 = r2 = result = 0
-        X_Start    = OffsetData['ProbData'][0]
-        Y_Start    = OffsetData['ProbData'][1] 
-        X_End      = OffsetData['ProbData'][2]
-        Y_End      = OffsetData['ProbData'][3]
-        R          = OffsetData['ProbData'][4] # R - the Resolution of the test
-        Nx    = int(floor((X_End - X_Start) / R))
-        Ny    = int(floor((Y_End - Y_Start) / R))
-        
-        if( X >= X_Start and Y >= X_Start and X<X_Start + R*(Nx-1) and Y< X_Start + R*(Ny-1) ):
-            Xclose = int(round((X-X_Start)/R, 0))
-            Yclose = int(round((Y-Y_Start)/R, 0))      
-            XcloseRatio = float(X_Start + R*Xclose)      
-            YcloseRatio = float(Y_Start + R*Yclose)
-            r1 = (XcloseRatio+R-X)*OffsetData['OffsetData'][Xclose][Yclose]/R + (X-XcloseRatio)*OffsetData['OffsetData'][Xclose+1][Yclose]/R
-            r2 = (XcloseRatio+R-X)*OffsetData['OffsetData'][Xclose][Yclose+1]/R + (X-XcloseRatio)*OffsetData['OffsetData'][Xclose+1][Yclose+1]/R
-            result = (YcloseRatio+R-Y)*r1/R + (Y-YcloseRatio)*r2/R 
+  
+        if( X >= self.X_Start and Y >= self.Y_Start and X<self.X_Start + self.R*(self.Nx) and Y< self.Y_Start + self.R*(self.Ny) ):
+            Xclose = int(floor((X-self.X_Start)/self.R))
+            Yclose = int(floor((Y-self.Y_Start)/self.R))    
+            XcloseRatio = float(self.X_Start + self.R*Xclose)      
+            YcloseRatio = float(self.Y_Start + self.R*Yclose)
+            r1 = (XcloseRatio+self.R-X)*self.MyOffsetData[Xclose][Yclose]/self.R + (X-XcloseRatio)*self.MyOffsetData[Xclose+1][Yclose]/self.R
+            r2 = (XcloseRatio+self.R-X)*self.MyOffsetData[Xclose][Yclose+1]/self.R + (X-XcloseRatio)*self.MyOffsetData[Xclose+1][Yclose+1]/self.R
+            result = (YcloseRatio+self.R-Y)*r1/self.R + (Y-YcloseRatio)*r2/self.R 
             result = format(result, ".4f")
-            return float(result)  
+            return float(result)
+        else:
+            print X, self.X_Start, Y, self.Y_Start, (self.X_Start + self.R*(self.Nx-1)), (self.Y_Start + self.R*(self.Ny-1))
+            print 'Data Out Of Range' 
     
 class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
     
     def __init__(self, parent=None):        
-        self.parent = parent
+        self.parent = parent        
         self.OC = OffsetCalc()
-        
+    
     def PrepareGcode(self, filename): #this function offsets the x axis to be in the positive side, and validates that all x and y locations have probing data.
-        _MaxX = _MaxY = _MinX = _MinY = _X = _Y = _OffsetX = _OffsetY = 0
+        _MaxX = _MaxY =  _MinX = _MinY = _Y  = _X = _OffsetX = _OffsetY = _Changed = first_time = 0
         _target_file = []
         str = str2 = ''
-        OffsetData = load('{}.npz'.format('offset')) # load the Offset data and initailze it
-        X_Start    = OffsetData['ProbData'][0]
-        Y_Start    = OffsetData['ProbData'][1]
-        X_End      = OffsetData['ProbData'][2]
-        Y_End      = OffsetData['ProbData'][3]
-        X_Data_Length = int(X_End - X_Start) #calcultae how much data we have in length for each axis
-        Y_Data_Length = int(Y_End - Y_Start)  
+        self.OC.ReloadData()
+        X_Data_Length = int(self.OC.X_End - self.OC.X_Start) #calcultae how much data we have in length for each axis
+        Y_Data_Length = int(self.OC.Y_End - self.OC.Y_Start)  
             
         GcodeFile = open(filename, 'r') #this gets us the max and min location for x and y        
         for line in GcodeFile:      
+            if (line.find('G00 X0.0000 Y0.0000') is not -1):
+                continue
             if (line.find('G00 X') is not -1 or line.find('G01 X') is not -1): # this simply saves the last X Y location of the last line
                 left, delimiter, right = line.partition('X')
                 left, delimiter, right = right.partition(' Y')  
@@ -266,29 +378,37 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
                     right = right.replace(" F200.00","")
                 right = right.replace("\n","")
                 _Y = float(right)
-                                
-            if (_X < _MinX): _MinX = _X
-            if (_Y < _MinY): _MinY = _Y
-            if (_X > _MaxX): _MaxX = _X
-            if (_Y > _MaxY): _MaxY = _Y
+                if (first_time == 0):
+                    first_time = 1
+                    _MinX = _X
+                    _MinY = _Y
+                    _MaxX = _X
+                    _MaxY = _Y
+                                    
+                if (_X < _MinX): _MinX = _X
+                if (_Y < _MinY): _MinY = _Y
+                if (_X > _MaxX): _MaxX = _X
+                if (_Y > _MaxY): _MaxY = _Y
         
         if (ceil(abs(_MaxX -_MinX)) > X_Data_Length or ceil(abs(_MaxY -_MinY)) > Y_Data_Length): # first validate  gcode isnt larger then probing data area    
+            print ceil(abs(_MaxX -_MinX)), X_Data_Length, ceil(abs(_MaxY -_MinY)), Y_Data_Length
             raise NameError('Insufficent Probing Data, Probe larger or Load Smaller Gcode')
-        if (_MinX < X_Start):
-            _OffsetX = ceil(abs(_MinX))+1
-        elif(_MaxX > X_End):
-            _OffsetX = ((_MaxX-X_End)*-1)-1
-        if (_MinY < Y_Start):
-            _OffsetY = ceil(abs(_MinY))+1
-        elif (_MaxY > Y_End):
-            _OffsetY = ((_MaxY-Y_End)*-1)-1
+        if (_MinX < self.OC.X_Start):
+            _OffsetX = ceil(self.OC.X_Start-_MinX)
+        elif(_MaxX > self.OC.X_End):
+            _OffsetX = ceil(_MaxX-self.OC.X_End)*-1
+        if (_MinY < self.OC.Y_Start):
+            _OffsetY = ceil(self.OC.Y_Start-_MinY)
+        elif (_MaxY > self.OC.Y_End):
+            _OffsetY = ceil(_MaxY-self.OC.Y_End)*-1
         
-        if (_OffsetX != 0 or _OffsetY != 0):
+        if (_OffsetX > 0 or _OffsetX < 0 or _OffsetY > 0 or _OffsetY < 0):
+            _Changed = 1
             GcodeFile = open(filename, 'r') #open the gcode file        
             for line in GcodeFile:      
                 if (line.find('(') is not -1): #this will remove all the text at start of the pcb gcode
                     continue
-                if (line.find('G00 X0.0000 Y0.0000') is not -1): #this will remove all the text at start of the pcb gcode
+                if (line.find('G00 X0.0000 Y0.0000') is not -1): #this will skip that line
                     _target_file.append(line)
                     continue 
                 if (line.find('G00 X') is not -1 or line.find('G01 X') is not -1): # this simply saves the last X Y location of the last line
@@ -308,11 +428,11 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
                     line = 'G{0} X{1} Y{2} {3} \n'.format(str2,_X+_OffsetX, _Y+_OffsetY, str)
                 _target_file.append(line)
         
-        GcodeFile.close()        
-        GcodeFile = open(filename, 'w')        
-        for line in _target_file:GcodeFile.write(line)
-        GcodeFile.close()
-        return
+            GcodeFile.close()        
+            GcodeFile = open(filename, 'w')        
+            for line in _target_file:GcodeFile.write(line)
+            GcodeFile.close()
+        return _Changed
                                  
     def GetDrillDepth(self, filename):
         GcodeFile = open(filename, 'r') #open the gcode file
@@ -325,22 +445,12 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
         
     def PcbOffset(self, filename): #non genric function (gcode specific - slic3r in this case)
         _index_counter = _editOn = _clear = _drill_depth= _X = _Y = _LastX = _LastY = _Z = _refx = _tempx = _tempy = _refy = _cur_dis = _min_dis = _leftover = 0 
-        _target_file = []
-        OffsetData = load('{}.npz'.format('offset')) # load the Offset data and initailze it
-        z_max = OffsetData['OffsetData'].max()
-        z_min = OffsetData['OffsetData'].min()
-        x0    = OffsetData['ProbData'][0]
-        y0    = OffsetData['ProbData'][1]
-        X_End = OffsetData['ProbData'][2]
-        Y_End = OffsetData['ProbData'][3]
-        R     = OffsetData['ProbData'][4]
-        Nx    = int(round((X_End - x0) / R, 0))
-        Ny    = int(round((Y_End - y0) / R, 0))        
-        
+        _target_file = ['M120 \n']        
+        self.OC.ReloadData()                 
         GcodeFile = open(filename, 'r') #open the gcode file
         _Num_Lines = sum(1 for line in GcodeFile)
-        _stepsize  = int(round(100000/float(_Num_Lines), 0))
-        print _stepsize
+        _stepsize  = int(round(100000/float(_Num_Lines), 0))*100
+        
         try: _drill_depth = float(self.GetDrillDepth(filename))
         except: 
             print 'Invalide PCB-Gcode File (No Drill Depth Found)'
@@ -349,20 +459,22 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
         GcodeFile = open(filename, 'r') #open the gcode file
         for line in GcodeFile: # this is the where the offseting is done
             _index_counter += 1  #keep index
-            self.parent.gauge.SetValue(pos=self.parent.gauge.GetValue() + _stepsize)
-            if (line.find('G01 Z') is not -1 or line.find('G00 Z') is not -1): ## if we have a line that starts with G01/G00 Z determine if its the going up or down
-                if (line.find('Z-') is not -1): ##if its going down then set edit ON, offset current Z and save x,y as refernce for testing is next point is utleast 2mm apart
-                    _editOn = 1
-                    _Z = self.OC.GetZforXY( _X, _Y, OffsetData)
-                    _refx = _X
-                    _refy = _Y    
-                    line = 'G01 Z{0} F200.00 \n'.format(_Z - _drill_depth)
-                    _target_file.append(line)
-                    continue
-                else: # otherwise it must be going up so just turn editOff
-                    _editOn = 0
-                    _target_file.append(line)
-                    continue
+            if (_index_counter % 100 == 0):
+                self.parent.gauge.SetValue(pos=self.parent.gauge.GetValue() + _stepsize)
+            #if (line.find('G01 Z') is not -1 or line.find('G00 Z') is not -1): ## if we have a line that starts with G01/G00 Z determine if its the going up or down
+            if (line.find('Z-') is not -1): ##if its going down then set edit ON, offset current Z and save x,y as refernce for testing is next point is utleast 2mm apart
+                _editOn = 1
+                _Z = self.OC.GetZforXY( _X, _Y)
+                _refx = _X
+                _refy = _Y
+                if (_Z is None): print 'No Z data for Point X{} Y{}'.format(_X , _Y)
+                line = 'G01 Z{0} F200.00 \n'.format(_Z - _drill_depth)
+                _target_file.append(line)
+                continue
+            elif (line.find('Z') is not -1): # otherwise it must be going up so just turn editOff
+                _editOn = 0
+                _target_file.append(line)
+                continue
                                
             if (line.find('G00 X') is not -1 or line.find('G01 X') is not -1): # this simply saves the last X Y location of the last line
                 left, delimiter, right = line.partition('X')
@@ -380,21 +492,21 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
                     
                     if (_min_dis < 0.3):   # if the point were testing is less than 2mm away from the refrence point just pass.
                         pass                    
-                    if (_min_dis > 0.3 and _cur_dis < R ): #if the distance to refrence point is more than 2 but less then R offset it like it is
-                        _Z = self.OC.GetZforXY(_X, _Y, OffsetData)
+                    if (_min_dis > 0.3 and _cur_dis < self.OC.R ): #if the distance to refrence point is more than 2 but less then R offset it like it is
+                        _Z = self.OC.GetZforXY(_X, _Y)
                         _refx = _X
                         _refy = _Y
                         line = 'G01 X{0} Y{1} Z{2} \n'.format(_X, _Y, (_Z - _drill_depth))
                     
-                    elif (_cur_dis > R):    #if the distance from the last point to currnet point is more than R we need to split the data by the reminder of the dis/R                     
-                        _leftover = int(floor(_cur_dis / R))
+                    elif (_cur_dis > self.OC.R):    #if the distance from the last point to currnet point is more than R we need to split the data by the reminder of the dis/R                     
+                        _leftover = int(floor(_cur_dis / self.OC.R))
                         line = ''
                         for i in range(1, _leftover + 2): # this splits the line to points that are less the R away from each other and offsets them
                             _tempx = (((_X - _LastX) / (_leftover + 1))* i) + _LastX # 
                             _tempy = (((_Y - _LastY) / (_leftover + 1))* i) + _LastY #
                             _tempx = float(format(_tempx, ".4f"))
                             _tempy = float(format(_tempy, ".4f"))                            
-                            _Z = self.OC.GetZforXY(_tempx, _tempy, OffsetData)
+                            _Z = self.OC.GetZforXY(_tempx, _tempy)
                     
                             line += 'G01 X{0} Y{1} Z{2} \n '.format(_tempx, _tempy, _Z - _drill_depth)
                        
@@ -403,17 +515,25 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
                        
                 _LastX = _X
                 _LastY = _Y            
-
     
             _target_file.append(line)
-            
-        GcodeFile.close()        
-        GcodeFile = open('test2.gcode', 'w')        
+        _target_file.append('M120')    
+        GcodeFile.close()
+        filename, fileExtension = os.path.splitext(filename)
+        filename+='_offset'+fileExtension       
+        GcodeFile = open(filename, 'w')        
         for line in _target_file:GcodeFile.write(line)
         GcodeFile.close()
-        
-             
- 
+
+    def TestFunction(self):              
+        _MyOffsetData = zeros((Nx,Ny),dtype=float)        
+        for i in range(self.OC.X_Start, self.OC.X_End+1):            
+            for j in range(self.OC.Y_Start, self.OCY_End+1): 
+                _Z = self.OC.GetZforXY(i, j)
+                _MyOffsetData[i-x0,j-y0] = _Z
+                print i,j                   
+        savez('test', OffsetData=_MyOffsetData)        
+                
 class Offset3D(object): #class for 3d printing offset calculations
     
     def GetLayer(self, filename, layer_number): #this function return a single layer of gcode as a list of lines
