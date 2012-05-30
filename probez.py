@@ -8,13 +8,9 @@ import wx, pronsole, time
 import wx.aui
 import sys
 import fileinput
-import threading
-import cProfile        
+import threading      
 
 set_printoptions(linewidth=80)
-
-
-
 
 ## known bug - after closing the probze gui and reopening the mayavi thing dont work seems to be related to how the gui is killed but couldnt figure it out.
 
@@ -160,15 +156,15 @@ class ProbeZ(object):
         self.X_End      = self.OffsetData['ProbData'][2]
         self.Y_End      = self.OffsetData['ProbData'][3]
         try:
-            z_max = self.OffsetData['OffsetData'].max()
+            self.z_max = self.OffsetData['OffsetData'].max()
         except:
-            z_max = 6
+            self.z_max = 6
         
     def SamplePoint(self): #this function will execute a single prob, TODO : make elevation reletive to last point not, absulute.
         _LastLine = _CurrentLastLine = _TimeOutCounter = _DeltaFloat = 0
         _LastLine = self.parent.parent.p.log[-1]
         #self.parent.parent.p.send_now("G92 Z4")
-        self.parent.parent.p.send_now("G1 Z-5 F60")
+        self.parent.parent.p.send_now("G1 Z-8 F60")
         self.parent.parent.p.clear = True
         while(True):
             _CurrentLastLine = self.parent.parent.p.log[-1]
@@ -329,7 +325,8 @@ class OffsetCalc(object):
         self.Nx    = int(floor((self.X_End - self.X_Start) / self.R))
         self.Ny    = int(floor((self.Y_End - self.Y_Start) / self.R))
         self.MyOffsetData = self.OffsetData['OffsetData']        
-
+        self.Zmax = self.OffsetData['OffsetData'].max()
+         
     def DisCalc(self, X1, Y1, X2, Y2):
         result = float(sqrt(power(X1-X2,2) + power(Y1-Y2,2)))
         result = format(result, ".4f")
@@ -359,7 +356,7 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
         self.OC = OffsetCalc()
     
     def PrepareGcode(self, filename): #this function offsets the x axis to be in the positive side, and validates that all x and y locations have probing data.
-        _MaxX = _MaxY =  _MinX = _MinY = _Y  = _X = _OffsetX = _OffsetY = _Changed = first_time = 0
+        _MaxX = _MaxY =  _MinX = _MinY = _Y  = _X = _OffsetX = _OffsetY = _Changed = first_time = skip = 0
         _target_file = []
         str = str2 = ''
         self.OC.ReloadData()
@@ -367,9 +364,9 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
         Y_Data_Length = int(self.OC.Y_End - self.OC.Y_Start)  
             
         GcodeFile = open(filename, 'r') #this gets us the max and min location for x and y        
-        for line in GcodeFile:      
+        for line in GcodeFile:
             if (line.find('G00 X0.0000 Y0.0000') is not -1):
-                continue
+                continue              
             if (line.find('G00 X') is not -1 or line.find('G01 X') is not -1): # this simply saves the last X Y location of the last line
                 left, delimiter, right = line.partition('X')
                 left, delimiter, right = right.partition(' Y')  
@@ -403,9 +400,16 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
             _OffsetY = ceil(_MaxY-self.OC.Y_End)*-1
         
         if (_OffsetX > 0 or _OffsetX < 0 or _OffsetY > 0 or _OffsetY < 0):
+            print 'Offset X by:{0} Offset Y by:{1}'.format(_OffsetX,_OffsetY)
             _Changed = 1
             GcodeFile = open(filename, 'r') #open the gcode file        
-            for line in GcodeFile:      
+            for line in GcodeFile:
+                if (line.find('M05') is not -1):
+                    skip = 6
+                    continue
+                if (skip > 0):
+                    skip -= 1
+                    continue      
                 if (line.find('(') is not -1): #this will remove all the text at start of the pcb gcode
                     continue
                 if (line.find('G00 X0.0000 Y0.0000') is not -1): #this will skip that line
@@ -437,9 +441,10 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
     def GetDrillDepth(self, filename):
         GcodeFile = open(filename, 'r') #open the gcode file
         for line in GcodeFile:
-            if (line.find('Z-') is not -1 or line.find('Z-') is not -1): ##if its going down then set edit ON, offset current Z and save x,y as refernce for testing is next point is utleast 2mm apart
+            if (line.find('Z-') is not -1): ##if its going down then set edit ON, offset current Z and save x,y as refernce for testing is next point is utleast 2mm apart
                 left, delimiter, right = line.partition('Z-')
                 left, delimiter, right = right.partition(' ')
+                print 'Drill Depth Found : {}'.format(left)
                 return left
         raise NameError('Invalide PCB-Gcode File (No Drill Depth Found)')
         
@@ -473,6 +478,7 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
                 continue
             elif (line.find('Z') is not -1): # otherwise it must be going up so just turn editOff
                 _editOn = 0
+                line = 'G01 Z{0} F2000 \n'.format(self.OC.Zmax + 1)
                 _target_file.append(line)
                 continue
                                
@@ -508,7 +514,7 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
                             _tempy = float(format(_tempy, ".4f"))                            
                             _Z = self.OC.GetZforXY(_tempx, _tempy)
                     
-                            line += 'G01 X{0} Y{1} Z{2} \n '.format(_tempx, _tempy, _Z - _drill_depth)
+                            line += 'G01 X{0} Y{1} Z{2} \n'.format(_tempx, _tempy, _Z - _drill_depth)
                        
                         _refx = _X
                         _refy = _Y
