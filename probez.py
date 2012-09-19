@@ -29,7 +29,7 @@ class MayaviView(HasTraits): #class for mayavi view
         # Create some data, and plot it using the embedded scene's engine
         OffsetData = load('{}.npz'.format('offset'))
         self.scene.mlab.surf(OffsetData['OffsetData'], warp_scale='auto')
- 
+
 class GuiWin(wx.Frame): #class for gui + general functions
     def __init__(self, size=(0, 0), parent=None):
         self.parent = parent
@@ -100,14 +100,13 @@ class GuiWin(wx.Frame): #class for gui + general functions
         self.yend.SetValue(str(OffsetData['ProbData'][3]))
         self.step.SetValue(str(OffsetData['ProbData'][4]))
         
-        #self.OPCG.TestFunction()
-                 
+        #self.OPCG.TestFunction()        
         OffsetData = load('{}.npz'.format('offset'))        
         self.mayavi_view = MayaviView()
         self.control = self.mayavi_view.edit_traits(parent=self,kind='subpanel').control
         self.notebook.AddPage(page=self.control, caption='3D Display')
         set_printoptions(threshold='nan')
-        
+
     def Load(self,  event, filename=None):
         basedir=self.parent.settings.last_file_path
         if not os.path.exists(basedir):
@@ -136,10 +135,11 @@ class GuiWin(wx.Frame): #class for gui + general functions
                     _Changed = self.OPCG.PrepareGcode(self.filename)
                     if (_Changed > 0): print 'File Offseted Into The Probed Area!'
                     print 'File Loaded Correctly!'
+                    return
                 except: 
                     print 'Insufficent Probing Data, Probe larger or Load Smaller Gcode'
                     return
-      
+                    
     def OffsetG(self, event):
         child = threading.Thread(target=self.OPCG.PcbOffset, args=[self.filename])
         child.setDaemon(True)
@@ -172,7 +172,7 @@ class ProbeZ(object):
                 break
         _CurrentLastLine = _CurrentLastLine.replace("echo:endstops","").replace("hit:","").replace("Z:","").replace(" ","").replace("\n","")
         self.parent.parent.p.send_now('G92 Z{}'.format(float(_CurrentLastLine)))
-        self.parent.parent.p.send_now('G1 Z{} F200'.format(1+float(_CurrentLastLine)))
+        self.parent.parent.p.send_now('G1 Z{} F150'.format(1+float(_CurrentLastLine)))
         return _CurrentLastLine
     
     def TestData(self): #this function will go 0.2mm over each 4 of the end points of data and see there is no endstop hit then go down by 0.1 and get an enstop hit.        
@@ -266,6 +266,7 @@ class ProbeZ(object):
        
     def SafeHome(self, endUp): #end up or down = 1 finsihes the move without homeing the z
         self.parent.parent.p.send_now('G92 Z0')
+        #self.parent.parent.p.send_now('G1 Z5 F100')
         self.parent.parent.p.send_now('G1 Z{}'.format(self.z_max+2)) #go up 1mm above z max so we dont run into the plate    
         self.parent.parent.p.send_now('G28 X0 Y0')
         if(endUp != 1):self.parent.parent.p.send_now('G28 Z0') #home z
@@ -287,13 +288,14 @@ class ProbeZ(object):
             _ProbData   = ([X_Start,Y_Start,X_End,Y_End,Step])
             z_max = 1                  
             if self.parent.parent.p.online:            
-                self.SafeHome(0)
-                self.parent.parent.p.send_now('G1 Z{}'.format(z_max)) #go up 1mm above z max so we dont run into the plate    
-                self.parent.parent.p.send_now('G1 X{0} Y{1}'.format(X_Start, Y_Start))
+                self.SafeHome(1)
+                self.parent.parent.p.send_now('G1 X{0} Y{1} F2000'.format(X_Start, Y_Start))
+                self.parent.parent.p.send_now('G28 Z0')
+                self.parent.parent.p.send_now('G1 Z{} F150'.format(z_max)) #go up 1mm above z max so we dont run into the plate                    
                 self.parent.parent.p.send_now('G92 X0 Y0')
                 _firstSample = self.SamplePoint()
                 for _ProbYPos in range(0, LoopCountY+1):
-                    self.parent.parent.p.send_now('G1 Y' + str(_ProbYPos*Step) + ' F10000')
+                    self.parent.parent.p.send_now('G1 Y' + str(_ProbYPos*Step) + ' F8000')
                     if _ProbYPos%2==0:
                       _InvertDirS = 0
                       _InvertDirE = LoopCountX + 1
@@ -303,7 +305,7 @@ class ProbeZ(object):
                       _InvertDirE = -1
                       LoopStep = -1
                     for _ProbXPos in range(_InvertDirS, _InvertDirE, LoopStep):
-                      self.parent.parent.p.send_now('G1 X' + str(_ProbXPos*Step) + ' F10000')
+                      self.parent.parent.p.send_now('G1 X' + str(_ProbXPos*Step) + ' F8000')
                       _CurrentLastLine = self.SamplePoint()
                       _OffsetData[_ProbXPos,_ProbYPos] = float(_CurrentLastLine)-float(_firstSample)                    
                 savez(file_out, OffsetData=_OffsetData, ProbData=_ProbData)
@@ -356,37 +358,47 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
         self.OC = OffsetCalc()
     
     def PrepareGcode(self, filename): #this function offsets the x axis to be in the positive side, and validates that all x and y locations have probing data.
-        _MaxX = _MaxY =  _MinX = _MinY = _Y  = _X = _OffsetX = _OffsetY = _Changed = first_time = skip = 0
+        _MaxX = _MaxY =  _MinX = _MinY = _Y  = _X = _Z = _F = _G = _OffsetX = _OffsetY = _Changed = first_time = skip = 0
         _target_file = []
-        str = str2 = ''
+        str = str2 = words = ''
         self.OC.ReloadData()
         X_Data_Length = int(self.OC.X_End - self.OC.X_Start) #calcultae how much data we have in length for each axis
         Y_Data_Length = int(self.OC.Y_End - self.OC.Y_Start)  
             
         GcodeFile = open(filename, 'r') #this gets us the max and min location for x and y        
         for line in GcodeFile:
-            if (line.find('G00 X0.0000 Y0.0000') is not -1):
+            if (line.find('(') is not -1):
+                continue
+            elif (line.find('G00 X0.0000 Y0.0000') is not -1):
                 continue              
-            if (line.find('G00 X') is not -1 or line.find('G01 X') is not -1): # this simply saves the last X Y location of the last line
-                left, delimiter, right = line.partition('X')
-                left, delimiter, right = right.partition(' Y')  
-                _X = float(left)
-                if(right.find(' F200.00') is not -1): #in case theres F200 in the end
-                    right = right.replace(" F200.00","")
-                right = right.replace("\n","")
-                _Y = float(right)
-                if (first_time == 0):
-                    first_time = 1
-                    _MinX = _X
-                    _MinY = _Y
-                    _MaxX = _X
-                    _MaxY = _Y
-                                    
-                if (_X < _MinX): _MinX = _X
-                if (_Y < _MinY): _MinY = _Y
-                if (_X > _MaxX): _MaxX = _X
-                if (_Y > _MaxY): _MaxY = _Y
-        
+            _G = _X = _Y = _Z = _F = None
+            words = line.split()            
+            for current_word in words:
+                if current_word.find('G') is not -1:
+                    _G = int(current_word.translate(None, 'G'))
+                elif current_word.find('X') is not -1:
+                    _X = float(current_word.translate(None, 'X'))
+                elif current_word.find('Y') is not -1:
+                    _Y = float(current_word.translate(None, 'Y'))
+                elif current_word.find('Z') is not -1:
+                    _Z = float(current_word.translate(None, 'Z'))
+                elif current_word.find('F') is not -1:
+                    _Z = float(current_word.translate(None, 'F'))
+       
+            if(_G == 0 or _G == 1):
+                if(_X != None and _Y != None and first_time == 0):
+                        first_time = 1
+                        _MinX = _X
+                        _MaxX = _X
+                        _MinY = _Y
+                        _MaxY = _Y
+                if(_X != None):                    
+                    if (_X < _MinX): _MinX = _X            
+                    if (_X > _MaxX): _MaxX = _X
+                if(_Y != None):
+                    if (_Y < _MinY): _MinY = _Y
+                    if (_Y > _MaxY): _MaxY = _Y
+                    
         if (ceil(abs(_MaxX -_MinX)) > X_Data_Length or ceil(abs(_MaxY -_MinY)) > Y_Data_Length): # first validate  gcode isnt larger then probing data area    
             print ceil(abs(_MaxX -_MinX)), X_Data_Length, ceil(abs(_MaxY -_MinY)), Y_Data_Length
             raise NameError('Insufficent Probing Data, Probe larger or Load Smaller Gcode')
@@ -423,11 +435,11 @@ class OffsetPCBGOCDE(object): #class for pcb gcode offset calculations
                     left, delimiter, right = right.partition(' Y')  
                     _X = float(left)
                     if(right.find(' F200.00') is not -1): #in case theres F200 in the end
-                        right = right.replace(" F200.00","")
+                        right = right.replace(' F200.00','')
                         str = 'F200.00'
                     else:
                         str = ''
-                    right = right.replace("\n","")
+                    right = right.replace('\n','')
                     _Y = float(right)                    
                     line = 'G{0} X{1} Y{2} {3} \n'.format(str2,_X+_OffsetX, _Y+_OffsetY, str)
                 _target_file.append(line)
